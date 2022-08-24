@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      // 存储副作用函数的桶
+      const bucket = new WeakMap();
+
+      // 缓存被注册的副作用函数
+      let activeEffect;
+
+      // effect栈
+      const effectStack = [];
+
+      // 原始数据
+      const data = {
+        foo: 1
+      };
+
+      // 监听函数
+      const obj = new Proxy(data, {
+        get(target, key) {
+          console.log('get-->', target, key);
+          // 将副作用函数activeEffect 添加到存储map集合中
+          track(target, key);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          console.log('set-->', target, key);
+          target[key] = newVal;
+          // 把副作用函数取出并执行
+          trigger(target, key);
+        },
+      });
+
+      // 封装监听事件
+      function track(target, key) {
+        // 没有activeEffect 直接return
+        if (!activeEffect) return target[key];
+        //  根据target 从map中取depsMap, key ---> effects
+        let depsMap = bucket.get(target);
+        // 如果不存在depsMap 那新建一个map 与 target 关联
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+
+        // 根据key从depsMap 中取得deps 一个set类型
+        // 里面存储这所有与当前key相关联的effects
+        let deps = depsMap.get(key);
+        // 如果不存在 那新建一个set 与 key关联
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+
+        // 将副作用函数添加set当中
+        deps.add(activeEffect);
+
+        // deps 就是一个与当前副作用函数存在联系的依赖集合
+        // 将其添加activeEffect.deps中
+        activeEffect.deps.push(deps);
+      }
+
+      // 在set拦截函数中调用
+      function trigger(target, key) {
+        // 根据 target
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        // 根据key取出副作用函数集合
+        const effects = depsMap.get(key);
+
+        // 避免重复执行
+        const effectToRun = new Set(effects);
+        effectToRun.forEach(fn => {
+          if(activeEffect !== fn) {
+            effectToRun.add(fn);
+          }
+        });
+        effectToRun.forEach(fn => {
+          // 副作用函数存在调度器中 则调用该调度器
+          if(fn.options.scheduler) {
+            fn.options.scheduler(fn)
+          } else {
+            fn()
+          }
+        });
+        // effects && effects.forEach((fn) => fn()); // 删除
+      }
+
+      // 用于注册副作用函数
+      function effect(fn, options = {}) { 
+        const effectFunc = () => {
+          // 调用cleanup函数完成清楚工作
+          cleanup(effectFunc);
+
+          activeEffect = effectFunc;
+
+          // 在调用副作用函数之前将当前副作用函数压入栈中
+          effectStack.push(effectFunc);
+          fn()
+
+          // 副作用函数执行完毕后弹出栈 并把activeEffect还原为之前的值
+          effectStack.pop();
+
+          activeEffect = effectStack[effectStack.length - 1];
+        }
+        // 将options挂载到effectFunc 
+        effectFunc.options = options;
+
+        // activeEffect.deps 用來存儲所有与该副作用函数相关联的依赖集合
+        effectFunc.deps = [];
+
+        effectFunc();
+      }
+
+      // 调用副作用函数
+      effect(() => {
+        console.log(obj.foo);
+      },
+      // options
+      {
+        // 调度器 scheduler 是一个函数
+        scheduler(fn) {
+          setTimeout(fn)
+        }
+      });
+
+      function cleanup(effectFunc) {
+        for(let i = 0; i < effectFunc.deps.length; i++) {
+          // deps 是依赖集合
+          const deps = effectFunc.deps[i];
+          // 将effecFunc从依赖集合中移除
+          deps.delete(effectFunc)
+        }
+        // 将deps数组重组
+        effectFunc.deps.length = 0;
+      }
+
+      obj.foo++;
+
+      console.log('结束了')
+
+    </script>
+  </body>
+</html>

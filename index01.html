@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      /**
+       * 响应式数据与副作用函数
+       */
+
+      // 存储副作用函数的桶
+      const bucket = new Set();
+
+      // 原始数据
+      const data = {
+        text: 'hello world'
+      };
+
+      // 监听函数
+      const obj = new Proxy(data, {
+        get(target, key) {
+            console.log('get--->', target, key);
+            // 缓存副作用函数 -> watcher
+            bucket.add(effect);
+
+            return target[key];
+        },
+        set(target, key, newVal) {
+            console.log('set--->', target, key, newVal)
+            target[key] = newVal;
+
+            bucket.forEach(fn => fn());
+
+            return true;
+        }
+      })
+
+      // 副作用函数
+      function effect() {
+        document.body.innerText = obj.text;
+      };
+      effect();
+
+      setTimeout(() => {
+        obj.text = 'vue3'
+      }, 1000)
+
+
+    </script>
+  </body>
+</html>

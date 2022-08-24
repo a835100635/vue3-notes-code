@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      // 存储副作用函数的桶
+      const bucket = new Set();
+
+      // 缓存被注册的副作用函数
+      let activeEffet;
+
+      // 原始数据
+      const data = {
+        text: "hello world",
+      };
+
+      // 监听函数
+      const obj = new Proxy(data, {
+        get(target, key) {
+          bucket.add(activeEffet);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          bucket.forEach((fn) => fn());
+
+          return true;
+        },
+      });
+
+      // 用于注册副作用函数
+      function effect(fn) {
+        activeEffet = fn;
+        fn();
+      }
+
+      // 调用副作用函数
+      effect(() => {
+        console.log('effect run');
+        document.body.innerText = obj.text;
+      });
+
+      setTimeout(() => {
+        obj.name = 'hello vue3';
+        console.log(obj);
+      }, 1000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      // 存储副作用函数的桶
+      const bucket = new WeakMap();
+
+      // 缓存被注册的副作用函数
+      let activeEffet;
+
+      // 原始数据
+      const data = {
+        text: "hello world",
+        name: 'zhangsan'
+      };
+
+      // 监听函数
+      const obj = new Proxy(data, {
+        get(target, key) {
+          // 没有activeEffet 直接return
+          if (!activeEffet) return target[key];
+          //  根据target 从map中取depsMap, key ---> effects
+          let depsMap = bucket.get(target);
+          // 如果不存在depsMap 那新建一个map 与 target 关联
+          if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()));
+          }
+
+          // 根据key从depsMap 中取得deps 一个set类型
+          // 里面存储这所有与当前key相关联的effects
+          let deps = depsMap.get(key);
+          // 如果不存在 那新建一个set 与 key关联
+          if (!deps) {
+            depsMap.set(key, (deps = new Set()));
+          }
+          
+          // 将副作用函数添加set当中
+          deps.add(activeEffet);
+
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          // 根据 target
+          const depsMap = bucket.get(target);
+          if(!depsMap) return;
+          const effects = depsMap.get(key);
+
+          effects && effects.forEach(fn => fn());
+        },
+      });
+
+      // 用于注册副作用函数
+      function effect(fn) {
+        activeEffet = fn;
+        fn();
+      }
+
+      // 调用副作用函数
+      effect(() => {
+        document.body.innerText = obj.text;
+      });
+
+      setTimeout(() => {
+        obj.text = 'hello vue3';
+        console.log(obj, bucket);
+      }, 1000);
+    </script>
+  </body>
+</html>
