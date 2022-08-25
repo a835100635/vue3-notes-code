@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>实现监听属性 computed</title>
+  </head>
+  <body>
+    <script>
+      // 存储副作用函数的桶
+      const bucket = new WeakMap();
+
+      // 缓存被注册的副作用函数
+      let activeEffect;
+
+      // effect栈
+      const effectStack = [];
+
+      // 原始数据
+      const data = {
+        foo: 1,
+        bar: 2
+      };
+
+      // 监听函数
+      const obj = new Proxy(data, {
+        get(target, key) {
+          console.log('get-->', target, key);
+          // 将副作用函数activeEffect 添加到存储map集合中
+          track(target, key);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          console.log('set-->', target, key);
+          target[key] = newVal;
+          // 把副作用函数取出并执行
+          trigger(target, key);
+        },
+      });
+
+      // 封装监听事件
+      function track(target, key) {
+        // 没有activeEffect 直接return
+        if (!activeEffect) return target[key];
+        //  根据target 从map中取depsMap, key ---> effects
+        let depsMap = bucket.get(target);
+        // 如果不存在depsMap 那新建一个map 与 target 关联
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+
+        // 根据key从depsMap 中取得deps 一个set类型
+        // 里面存储这所有与当前key相关联的effects
+        let deps = depsMap.get(key);
+        // 如果不存在 那新建一个set 与 key关联
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+
+        // 将副作用函数添加set当中
+        deps.add(activeEffect);
+
+        // deps 就是一个与当前副作用函数存在联系的依赖集合
+        // 将其添加activeEffect.deps中
+        activeEffect.deps.push(deps);
+      }
+
+      // 在set拦截函数中调用
+      function trigger(target, key) {
+        // 根据 target
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        // 根据key取出副作用函数集合
+        const effects = depsMap.get(key);
+
+        // 避免重复执行
+        const effectToRun = new Set(effects);
+        effectToRun.forEach(fn => {
+          if(activeEffect !== fn) {
+            effectToRun.add(fn);
+          }
+        });
+        effectToRun.forEach(fn => {
+          // 副作用函数存在调度器中 则调用该调度器
+          if(fn.options.scheduler) {
+            fn.options.scheduler(fn)
+          } else {
+            fn()
+          }
+        });
+        // effects && effects.forEach((fn) => fn()); // 删除
+      }
+
+      // 用于注册副作用函数
+      function effect(fn, options = {}) { 
+        const effectFunc = () => {
+          // 调用cleanup函数完成清楚工作
+          cleanup(effectFunc);
+
+          activeEffect = effectFunc;
+
+          // 在调用副作用函数之前将当前副作用函数压入栈中
+          effectStack.push(effectFunc);
+          // 将fn的执行结果存储
+          const res = fn()
+
+          // 副作用函数执行完毕后弹出栈 并把activeEffect还原为之前的值
+          effectStack.pop();
+
+          activeEffect = effectStack[effectStack.length - 1];
+          // 将结果返回
+          return res;
+        }
+        // 将options挂载到effectFunc 
+        effectFunc.options = options;
+
+        // activeEffect.deps 用來存儲所有与该副作用函数相关联的依赖集合
+        effectFunc.deps = [];
+
+        // 只有lazy的时候才执行
+        if (!options.lazy){
+          // 执行
+          effectFunc();
+        }
+        return effectFunc
+      }
+
+      // 定义一个任务队列
+      const jobQueue = new Set();
+      // 使用promise.resolve创建promise实例 微任务队列
+      const p = Promise.resolve();
+
+      // 一个标记代表是否正在刷新队列
+      let isFlushing = false;
+      function flushJob() {
+        // 如果正在刷新 则什么都不做
+        if(isFlushing) return;
+
+        // 标记正在刷新
+        isFlushing = true;
+
+        // 微任务队列中执行job队列
+        p.then(() => {
+          jobQueue.forEach(fn => fn());
+        }).finally(() => {
+          // 执行完后标记不再刷新队列
+          isFlushing = false;
+        })
+      }
+
+      // 调用副作用函数
+      const effectFunc = effect(
+      // 指定了lazy选项，这个函数不会立即执行
+      () => {
+        return obj.foo+obj.bar;
+      },
+      // options
+      {
+        lazy: true
+      });
+      
+      // console.log('--', effectFunc());
+
+      function cleanup(effectFunc) {
+        for(let i = 0; i < effectFunc.deps.length; i++) {
+          // deps 是依赖集合
+          const deps = effectFunc.deps[i];
+          // 将effecFunc从依赖集合中移除
+          deps.delete(effectFunc)
+        }
+        // 将deps数组重组
+        effectFunc.deps.length = 0;
+      }
+
+      // 实现监听属性 computed
+      function computed(getter) {
+        // 把getter 作为副作用函数 创建一个lazy的effect
+        const effectFunc = effect(getter, {
+          lazy: true
+        });
+
+        const obj = {
+          // 当读取value才执行effectFunc
+          get value() {
+            return effectFunc()
+          }
+        }
+
+        return obj;
+
+      }
+
+      const sum = computed(() => obj.foo + obj.bar);
+      console.log('sum--->', sum.value);
+
+    </script>
+  </body>
+</html>
